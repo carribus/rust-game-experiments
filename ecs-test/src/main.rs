@@ -21,15 +21,56 @@ type EntityMap<T> = GenerationalIndexArray<T>;
 #[derive(Debug)]
 pub struct GameState {
     pub entity_allocator: GenerationalIndexAllocator,
+    pub entities: Vec<Entity>,
     pub position_components: EntityMap<Position>,
     pub velocity_components: EntityMap<Velocity>,
+}
 
-    entities: Vec<Entity>,
+struct AutoMovementSystem {}
+
+impl AutoMovementSystem {
+    fn process(state: &mut GameState) {
+        for e in state.entities.iter() {
+            let v = state.velocity_components.get(*e);
+            let p = state.position_components.get_mut(*e);
+
+            match (p, v) {
+                (Some(p), Some(v)) => {
+                    p.x += v.xv;
+                    p.y += v.yv;
+                },
+                _ => (),
+            }
+        }
+    }
 }
 
 fn main() {
-    // TODO: You just added the GenerationIndex code from Kyren.github.io and were working through
-    // how it should work and whether you like this approach...
+    let mut state = GameState {
+        entity_allocator: GenerationalIndexAllocator::new(),
+        entities: Vec::new(),
+        position_components: EntityMap::new(),
+        velocity_components: EntityMap::new(),
+    };
+
+    for i in 0..10 {
+        let e = state.entity_allocator.allocate();
+        state.entities.insert(e.index, e);
+        state.position_components.set(e, Position{ x: i as f32, y: i as f32 });
+        state.velocity_components.set(e, Velocity{ xv: (i+1) as f32, yv: (i+1) as f32 });
+    }
+
+    // do 10 iterations of movement
+    for i in 0..10 {
+        AutoMovementSystem::process(&mut state);
+        println!("Tick {}:\n", i);
+        for (idx, e) in state.entities.iter().enumerate() {
+            if let Some(p) = state.position_components.get(*e) {
+                println!("[{}] x:{:.1}, y:{:.1}", idx, p.x, p.y);
+            }
+        }
+        println!("");
+    }
 }
 
 
