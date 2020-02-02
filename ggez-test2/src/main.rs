@@ -9,7 +9,7 @@ type Entity = GenerationalIndex;
 type EntityMap<T> = GenerationalIndexArray<T>;
 
 trait System {
-    fn process(ctx: &mut Context, state: &mut GameState, e: &mut Entity) -> GameResult<()>;
+    fn process(ctx: &mut Context, state: &mut GameState) -> GameResult<()>;
 }
 
 #[derive(Debug, Copy, Clone, Default, PartialEq)]
@@ -28,27 +28,32 @@ const SPRITE_SIZE: f32 = 5.0;
 
 struct CollissionSystem;
 impl System for CollissionSystem {
-    fn process(ctx: &mut Context, state: &mut GameState, e: &mut Entity) -> GameResult<()> {
+    fn process(ctx: &mut Context, state: &mut GameState) -> GameResult<()> {
         let screen_rect = graphics::screen_coordinates(ctx);
+        let mut rng = rand::thread_rng();
 
-        match (state.position_components.get_mut(*e), state.velocity_components.get_mut(*e)) {
-            (Some(p), Some(v)) => {
-                // check if we hit the bottom of the screen
-                if p.y + SPRITE_SIZE >= screen_rect.h {
-                    v.yv *= -0.75;
-                    v.xv *= 0.8;
-                }
-                // check if we hit the edge of the screen
-                if p.x + SPRITE_SIZE >= screen_rect.w || p.x <= 0.0 {
-                    v.xv *= -0.9;
-                }
+        for e in state.entities.iter() {
+            if state.entity_allocator.is_live(*e) {
+                match (state.position_components.get_mut(*e), state.velocity_components.get_mut(*e)) {
+                    (Some(p), Some(v)) => {
+                        // check if we hit the bottom of the screen
+                        if p.y + SPRITE_SIZE >= screen_rect.h {
+                            v.yv *= -rng.gen::<f32>();
+                            v.xv *= 0.8;
+                        }
+                        // check if we hit the edge of the screen
+                        if p.x + SPRITE_SIZE >= screen_rect.w || p.x <= 0.0 {
+                            v.xv *= -0.9;
+                        }
 
-                // if both velocity components are 0, the entity is dead
-                if v.xv >= -0.01 && v.xv <= 0.01 {
-                    state.entity_allocator.deallocate(*e);
+                        // if both velocity components are 0, the entity is dead
+                        if v.xv >= -0.01 && v.xv <= 0.01 {
+                            state.entity_allocator.deallocate(*e);
+                        }
+                    },
+                    _ => (),
                 }
-            },
-            _ => (),
+            }
         }
 
         Ok(())
@@ -57,20 +62,25 @@ impl System for CollissionSystem {
 
 struct MovementSystem;
 impl System for MovementSystem {
-    fn process(ctx: &mut Context, state: &mut GameState, e: &mut Entity) -> GameResult<()> {
+    fn process(ctx: &mut Context, state: &mut GameState) -> GameResult<()> {
         let screen_rect = graphics::screen_coordinates(ctx);
-        match (state.position_components.get_mut(*e), state.velocity_components.get_mut(*e)) {
-            (Some(p), Some(v)) => {
-                p.x = na::clamp(p.x + v.xv, screen_rect.left(), screen_rect.w - SPRITE_SIZE);
-                p.y = na::clamp(p.y + v.yv, screen_rect.top(), screen_rect.h - SPRITE_SIZE);
 
-                v.yv = na::clamp(v.yv + 0.15, -10.0, 10.0);
-                if v.yv >= -0.01 && v.yv <= 0.01 {
-                    v.yv = 0.0;
+        for e in state.entities.iter() {
+            if state.entity_allocator.is_live(*e) {
+                match (state.position_components.get_mut(*e), state.velocity_components.get_mut(*e)) {
+                    (Some(p), Some(v)) => {
+                        p.x = na::clamp(p.x + v.xv, screen_rect.left(), screen_rect.w - SPRITE_SIZE);
+                        p.y = na::clamp(p.y + v.yv, screen_rect.top(), screen_rect.h - SPRITE_SIZE);
+
+                        v.yv = na::clamp(v.yv + 0.15, -10.0, 10.0);
+                        if v.yv >= -0.01 && v.yv <= 0.01 {
+                            v.yv = 0.0;
+                        }
+
+                    },
+                    _ => (), // ignore if both position and velocity components are not avaialable
                 }
-
-            },
-            _ => (), // ignore if both position and velocity components are not avaialable
+            }
         }
 
         Ok(())
@@ -79,31 +89,38 @@ impl System for MovementSystem {
 
 struct RenderSystem;
 impl System for RenderSystem {
-    fn process(ctx: &mut Context, state: &mut GameState, e: &mut Entity) -> GameResult<()> {
-        match state.position_components.get(*e) {
-            Some(p) => {
-                let m = graphics::Mesh::new_rectangle(ctx, 
-                    graphics::DrawMode::fill(), 
-                    graphics::Rect::new(0.0, 0.0, SPRITE_SIZE, SPRITE_SIZE), 
-                    graphics::Color::from_rgb(255, 255, 255)
-                )?;
+    fn process(ctx: &mut Context, state: &mut GameState) -> GameResult<()> {
+        let mut mb = graphics::MeshBuilder::new();  // use a mesh to optimise the render pipeline
+        let mut should_render_mesh = false;
+        for e in state.entities.iter() {
+            if state.entity_allocator.is_live(*e) {
+                should_render_mesh = true;
+                match state.position_components.get(*e) {
+                    Some(p) => {
+                        mb.rectangle(
+                            graphics::DrawMode::fill(), 
+                            graphics::Rect::new(p.x, p.y, SPRITE_SIZE, SPRITE_SIZE), 
+                            graphics::Color::from_rgb(255, 255, 255)
+                        );
+                    },
+                    None => (),
+                }
+            }
+        }
 
-                graphics::draw(ctx, &m, (na::Point2::new(p.x, p.y),))?;
-            },
-            None => (),
+        if should_render_mesh == true {
+            let mesh = mb.build(ctx)?;
+            graphics::draw(ctx, &mesh, (na::Point2::new(0.0, 0.0),))?;
         }
 
         Ok(())
     }
 }
 
-use std::rc::Rc;
-use std::cell::RefCell;
-
 #[derive(Debug)]
 struct GameState {
     pub entity_allocator: GenerationalIndexAllocator,
-    pub entities: Rc<RefCell<Vec<Entity>>>,
+    pub entities: Vec<Entity>,
     pub position_components: EntityMap<Position>,
     pub velocity_components: EntityMap<Velocity>,
 }
@@ -112,7 +129,7 @@ impl GameState {
     fn new() -> Self {
         GameState {
             entity_allocator: GenerationalIndexAllocator::new(),
-            entities: Rc::new(RefCell::new(Vec::new())),
+            entities: Vec::new(),
             position_components: EntityMap::new(),
             velocity_components: EntityMap::new(),
         }
@@ -134,11 +151,11 @@ impl GameState {
 
     fn generate_entities(&mut self) {
         let mut rng = rand::thread_rng();
-        for _ in 0..100 {
+        for _ in 0..1000 {
             let e = self.entity_allocator.allocate();
-            self.entities.borrow_mut().insert(e.index, e);
+            self.entities.insert(e.index, e);
             self.position_components.set(e, Position{ x: rng.gen::<f32>() * 1280.0, y: rng.gen::<f32>() * 900.0 });
-            self.velocity_components.set(e, Velocity{ xv: 1.0 + rng.gen::<f32>() * 5.0, yv: 0.0 });
+            self.velocity_components.set(e, Velocity{ xv: 1.0 + rng.gen::<f32>() * 15.0, yv: 0.0 });
         }
     }
 }
@@ -146,14 +163,9 @@ impl GameState {
 impl event::EventHandler for GameState {
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
         // run various systems
-        let entities = self.entities.clone();
 
-        for e in entities.borrow_mut().iter_mut() {
-            if self.entity_allocator.is_live(*e) {
-                MovementSystem::process(ctx, self, e)?;
-                CollissionSystem::process(ctx, self, e)?;
-            }
-        }
+        MovementSystem::process(ctx, self)?;
+        CollissionSystem::process(ctx, self)?;
 
         Ok(())
     }
@@ -163,14 +175,7 @@ impl event::EventHandler for GameState {
 
         self.draw_debug_info(ctx)?;
 
-        let entities = self.entities.clone();
-
-        for e in entities.borrow_mut().iter_mut() {
-            if self.entity_allocator.is_live(*e) {
-                RenderSystem::process(ctx, self, e)?;
-            }
-        }
-
+        RenderSystem::process(ctx, self)?;
 
         graphics::present(ctx)?;
         Ok(())
@@ -199,16 +204,14 @@ fn main() {
         .build()
         .expect("Failed to create ggez context!");
 
-    // setup the immovable entity
-    // let e = state.entity_allocator.allocate();
-    // state.entities.borrow_mut().insert(e.index, e);
-    // state.position_components.set(e, Position{ x: 640.0, y: 512.0 });
-    
     // setup the movable entity
     state.generate_entities();
 
-
-
+    // setup the immovable entity
+    let e = state.entity_allocator.allocate();
+    state.entities.insert(e.index, e);
+    state.position_components.set(e, Position{ x: 640.0, y: 512.0 });
+        
     match event::run(ctx, event_loop, state) {
         Ok(_) => (),
         Err(e) => println!("ERROR: {}", e),
