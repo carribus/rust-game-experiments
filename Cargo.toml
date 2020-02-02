@@ -2,4 +2,5 @@
 members = [
     "ggez-test",
     "ecs-test",
+    "ggez-test2",
 ]
