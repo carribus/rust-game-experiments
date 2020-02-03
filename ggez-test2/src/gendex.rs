@@ -101,6 +101,8 @@ impl<T> GenerationalIndexArray<T> {
                 generation: index.generation,
             });
         } else {
+            // if the index is past the length of the current vec, we need to add some None elements
+            while self.0.len() <= index.index { self.0.push(None) }
             self.0.insert(index.index, Some(ArrayEntry {
                 value,
                 generation: index.generation,

@@ -24,6 +24,18 @@ struct Velocity {
     yv: f32,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum ShapeType {
+    Rectangle(f32, f32),
+    Circle(f32),
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct Shape {
+    shape_type: ShapeType,
+    colour: graphics::Color,
+}
+
 const SPRITE_SIZE: f32 = 5.0;
 
 struct CollissionSystem;
@@ -95,15 +107,24 @@ impl System for RenderSystem {
         for e in state.entities.iter() {
             if state.entity_allocator.is_live(*e) {
                 should_render_mesh = true;
-                match state.position_components.get(*e) {
-                    Some(p) => {
-                        mb.rectangle(
-                            graphics::DrawMode::fill(), 
-                            graphics::Rect::new(p.x, p.y, SPRITE_SIZE, SPRITE_SIZE), 
-                            graphics::Color::from_rgb(255, 255, 255)
-                        );
+                match (state.position_components.get(*e), state.shape_components.get(*e)) {
+                    (Some(p), Some(s)) => {
+                        match s.shape_type {
+                            ShapeType::Rectangle(w, h) => {
+                                mb.rectangle(
+                                    graphics::DrawMode::fill(), 
+                                    graphics::Rect::new(p.x, p.y, w, h), 
+                                    s.colour,
+                                );
+                            },
+                            ShapeType::Circle(r) => {
+                                mb.circle(graphics::DrawMode::fill(),
+                                    na::Point2::new(p.x, p.y), 
+                                    r, 1.0, s.colour);
+                            },
+                        }
                     },
-                    None => (),
+                    _ => (),
                 }
             }
         }
@@ -123,6 +144,7 @@ struct GameState {
     pub entities: Vec<Entity>,
     pub position_components: EntityMap<Position>,
     pub velocity_components: EntityMap<Velocity>,
+    pub shape_components: EntityMap<Shape>,
 }
 
 impl GameState {
@@ -132,6 +154,7 @@ impl GameState {
             entities: Vec::new(),
             position_components: EntityMap::new(),
             velocity_components: EntityMap::new(),
+            shape_components: EntityMap::new(),
         }
     }
 
@@ -156,6 +179,10 @@ impl GameState {
             self.entities.insert(e.index, e);
             self.position_components.set(e, Position{ x: rng.gen::<f32>() * 1280.0, y: rng.gen::<f32>() * 900.0 });
             self.velocity_components.set(e, Velocity{ xv: 1.0 + rng.gen::<f32>() * 15.0, yv: 0.0 });
+            self.shape_components.set(e, Shape{ 
+                shape_type: ShapeType::Circle(4.0), 
+                colour: graphics::Color::from_rgba(255, 255, 255, rng.gen::<u8>())
+            });
         }
     }
 }
@@ -211,6 +238,7 @@ fn main() {
     let e = state.entity_allocator.allocate();
     state.entities.insert(e.index, e);
     state.position_components.set(e, Position{ x: 640.0, y: 512.0 });
+    state.shape_components.set(e, Shape{ shape_type: ShapeType::Rectangle(20.0, 20.0), colour: graphics::Color::from_rgb(255, 128, 128)});
         
     match event::run(ctx, event_loop, state) {
         Ok(_) => (),
