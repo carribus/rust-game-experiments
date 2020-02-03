@@ -1,5 +1,8 @@
 mod gendex;
+mod components;
+
 use crate::gendex::*;
+use crate::components::*;
 
 use ggez::*;
 use rand::prelude::*;
@@ -12,32 +15,6 @@ trait System {
     fn process(ctx: &mut Context, state: &mut GameState) -> GameResult<()>;
 }
 
-#[derive(Debug, Copy, Clone, Default, PartialEq)]
-struct Position {
-    x: f32,
-    y: f32,
-}
-
-#[derive(Debug, Copy, Clone, Default, PartialEq)]
-struct Velocity {
-    xv: f32,
-    yv: f32,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-enum ShapeType {
-    Rectangle(f32, f32),
-    Circle(f32),
-}
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-struct Shape {
-    shape_type: ShapeType,
-    colour: graphics::Color,
-}
-
-const SPRITE_SIZE: f32 = 5.0;
-
 struct CollissionSystem;
 impl System for CollissionSystem {
     fn process(ctx: &mut Context, state: &mut GameState) -> GameResult<()> {
@@ -46,15 +23,21 @@ impl System for CollissionSystem {
 
         for e in state.entities.iter() {
             if state.entity_allocator.is_live(*e) {
-                match (state.position_components.get_mut(*e), state.velocity_components.get_mut(*e)) {
-                    (Some(p), Some(v)) => {
+                match (state.position_components.get_mut(*e), state.velocity_components.get_mut(*e), state.shape_components.get(*e)) {
+                    (Some(p), Some(v), Some(s)) => {
+                        let (w, h) = {
+                            match s.shape_type {
+                                ShapeType::Circle(r) => (r, r),
+                                ShapeType::Rectangle(w, h) => (w, h),
+                            }
+                        };
                         // check if we hit the bottom of the screen
-                        if p.y + SPRITE_SIZE >= screen_rect.h {
+                        if p.y + h >= screen_rect.h {
                             v.yv *= -rng.gen::<f32>();
                             v.xv *= 0.8;
                         }
                         // check if we hit the edge of the screen
-                        if p.x + SPRITE_SIZE >= screen_rect.w || p.x <= 0.0 {
+                        if p.x + w >= screen_rect.w || p.x <= 0.0 {
                             v.xv *= -0.9;
                         }
 
@@ -79,10 +62,16 @@ impl System for MovementSystem {
 
         for e in state.entities.iter() {
             if state.entity_allocator.is_live(*e) {
-                match (state.position_components.get_mut(*e), state.velocity_components.get_mut(*e)) {
-                    (Some(p), Some(v)) => {
-                        p.x = na::clamp(p.x + v.xv, screen_rect.left(), screen_rect.w - SPRITE_SIZE);
-                        p.y = na::clamp(p.y + v.yv, screen_rect.top(), screen_rect.h - SPRITE_SIZE);
+                match (state.position_components.get_mut(*e), state.velocity_components.get_mut(*e), state.shape_components.get(*e)) {
+                    (Some(p), Some(v), Some(s)) => {
+                        let (w, h) = {
+                            match s.shape_type {
+                                ShapeType::Circle(r) => (r, r),
+                                ShapeType::Rectangle(w, h) => (w, h),
+                            }
+                        };
+                        p.x = na::clamp(p.x + v.xv, screen_rect.left(), screen_rect.w - w);
+                        p.y = na::clamp(p.y + v.yv, screen_rect.top(), screen_rect.h - h);
 
                         v.yv = na::clamp(v.yv + 0.15, -10.0, 10.0);
                         if v.yv >= -0.01 && v.yv <= 0.01 {
